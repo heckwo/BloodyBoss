@@ -134,8 +134,10 @@ namespace BloodyBoss.Command
                 var user = ctx.Event.SenderUserEntity;
                 if (Database.GetBoss(BossName, out BossEncounterModel Boss))
                 {
-                    Boss.Spawn(user);
-                    
+                    if (!Boss.Spawn(user))
+                    {
+                        throw ctx.Error($"Boss '{BossName}' failed to spawn. Check that Lifetime is set to a value greater than 0 seconds.");
+                    }
                 }
                 else
                 {
@@ -148,10 +150,12 @@ namespace BloodyBoss.Command
             }
             catch (Exception e)
             {
-                throw ctx.Error($"Error: {e.Message}");
+                // Log the full exception with stack trace so we can pinpoint the exact crash location
+                Plugin.BLogger.Error(LogCategory.Boss, $"[BB START] Exception spawning '{BossName}': {e.GetType().Name}: {e.Message}\nStack: {e.StackTrace}");
+                if (e.InnerException != null)
+                    Plugin.BLogger.Error(LogCategory.Boss, $"[BB START] Inner: {e.InnerException.GetType().Name}: {e.InnerException.Message}\nStack: {e.InnerException.StackTrace}");
+                throw ctx.Error($"Error: {e.Message} (check server log for full details)");
             }
-
-
         }
 
 

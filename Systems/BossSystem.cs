@@ -18,14 +18,14 @@ using Bloody.Core.GameData.v1;
 
 namespace BloodyBoss.Systems
 {
-    
+
     internal class BossSystem
     {
-        
+
         private static int lastMinute = -1; // Initialize to -1 to force first check
         private static Timer bossTimer;
         private static bool isTimerRunning = false;
-       
+
         public static Action bossAction;
 
         public static void StartTimer()
@@ -38,27 +38,28 @@ namespace BloodyBoss.Systems
             }
 
             Plugin.BLogger.Info(LogCategory.System, "Starting BloodyBoss timer (independent of player connections)");
-            
+
             bossAction = () =>
             {
                 try
                 {
-                    // Comprehensive null safety checks
+                    // All ECS access is safe here — this lambda only ever runs on the main game thread
+                    // (enforced by the RunActionOnMainThread wrapper in the timer callback below).
                     if (Plugin.SystemsCore == null)
                     {
                         Plugin.BLogger.Trace(LogCategory.Timer, "BossSystem timer: SystemsCore not ready yet, skipping...");
                         return;
                     }
-                    
+
                     if (Plugin.SystemsCore.PrefabCollectionSystem == null)
                     {
                         Plugin.BLogger.Trace(LogCategory.Timer, "BossSystem timer: Essential systems not ready yet, skipping...");
                         return;
                     }
-                    
+
                     var now = DateTime.Now;
                     bool minuteChanged = now.Minute != lastMinute;
-                    
+
                     if (minuteChanged)
                     {
                         lastMinute = now.Minute;
@@ -69,21 +70,14 @@ namespace BloodyBoss.Systems
                             Plugin.BLogger.Info(LogCategory.Spawn, $"Found {spawnsBoss.Count} bosses to spawn at {currentTime}");
                             foreach (var spawnBoss in spawnsBoss)
                             {
-                                Action actionSpawnDespawn = () =>
-                                {
-                                    spawnBoss.CheckSpawnDespawn();
-                                };
-
-                                ActionScheduler.RunActionOnMainThread(actionSpawnDespawn);
+                                spawnBoss.CheckSpawnDespawn();
                             }
                         }
                     }
-                    
-                    // Manual despawn by HourDespawn is now disabled - using LifeTime system instead
-                    // The boss will be automatically destroyed when LifeTime expires
-                    
-                    // Optimized boss update - only check active bosses
-                    BossTrackingSystem.UpdateActiveBosses();
+
+                    // Already on main thread — call internal update directly
+                    BossTrackingSystem.UpdateActiveBossesOnMainThread();
+                    HealthMonitorSystem.Update();
                 }
                 catch (Exception ex)
                 {
@@ -91,10 +85,18 @@ namespace BloodyBoss.Systems
                 }
             };
 
-            // Usar System.Threading.Timer en lugar de CoroutineHandler
-            // Esto funciona independientemente de si hay jugadores conectados
-            // IMPORTANTE: Retrasar la primera ejecución 10 segundos para dar tiempo a que el mundo se inicialice
-            bossTimer = new Timer(_ => bossAction?.Invoke(), null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(1));
+            // CRITICAL FIX: System.Threading.Timer fires on a .NET thread pool background thread.
+            // ANY call into Unity ECS / IL2CPP from a background thread causes AccessViolationException.
+            // The previous code called bossAction?.Invoke() directly on the thread pool thread,
+            // meaning even the first null check (Plugin.SystemsCore == null) crashed the server.
+            // The fix: the timer callback only schedules work on the main game thread via RunActionOnMainThread.
+            // bossAction itself NEVER runs on the background thread.
+            bossTimer = new Timer(
+                _ => ActionScheduler.RunActionOnMainThread(() => bossAction?.Invoke()),
+                null,
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(1)
+            );
             isTimerRunning = true;
             Plugin.BLogger.Info(LogCategory.Timer, "BloodyBoss timer started successfully (first check in 10 seconds)");
         }
@@ -121,22 +123,22 @@ namespace BloodyBoss.Systems
                 Plugin.BLogger.Debug(LogCategory.Boss, "CheckBoss: EntityManager not ready");
                 return;
             }
-            
+
             // Only run if we have very few tracked bosses (might have missed some)
             if (BossTrackingSystem.GetActiveBossCount() > 5)
             {
                 return; // Skip if we already have plenty of bosses tracked
             }
-            
+
             // Use cached entities for discovery of untracked bosses
             var entities = ComponentCache.GetBossEntities();
-            
+
             foreach (var entity in entities)
             {
                 // Use extension method to check if it's a BloodyBoss
                 if (!entity.IsBloodyBoss())
                     continue;
-                    
+
                 // Use extension method to get the boss model
                 BossEncounterModel bossModel = entity.GetBossModel();
                 if (bossModel != null && bossModel.bossSpawn)
@@ -144,21 +146,21 @@ namespace BloodyBoss.Systems
                     // Check if this boss is already tracked
                     string bossName = bossModel.name;
                     Entity trackedEntity;
-                    
+
                     if (!BossTrackingSystem.TryGetBossByName(bossName, out trackedEntity))
                     {
                         // Boss not tracked yet, register it
                         Plugin.BLogger.Info(LogCategory.Boss, $"[CheckBoss] Found untracked boss {bossName}, registering for optimized tracking");
                         BossTrackingSystem.RegisterSpawnedBoss(entity, bossModel);
                         BossGameplayEventSystem.RegisterBoss(entity, bossModel);
-                        
+
                         // Initial setup for discovered boss
                         var userModel = GameData.Users.All.FirstOrDefault();
                         if (userModel != null)
                         {
                             bossModel.ModifyBoss(userModel.Entity, entity);
                             CheckTeams(entity);
-                            
+
                             if (PluginConfig.ClearDropTable.Value)
                             {
                                 var action = () =>
@@ -171,7 +173,7 @@ namespace BloodyBoss.Systems
                     }
                 }
             }
-            
+
             // Note: We don't dispose NativeArrays from cache as they're managed by ComponentCache
             // Ya no necesitamos llamar StartTimer() aquí porque el timer ya está funcionando independientemente
         }
@@ -190,29 +192,29 @@ namespace BloodyBoss.Systems
                     Plugin.BLogger.Warning(LogCategory.Boss, "First boss spawned, setting as default team");
                     Database.TeamDefault = entityManager.GetComponentData<Team>(boss);
                     Plugin.BLogger.Info(LogCategory.Boss, $"Default team set to: {Database.TeamDefault.Value.Value}");
-                    
+
                     // TeamReference will be handled by BossTrackingSystem when it becomes valid
                 }
                 else
                 {
                     // Apply the default team to this boss
                     var currentTeam = entityManager.GetComponentData<Team>(boss);
-                    
+
                     if (currentTeam.Value != Database.TeamDefault.Value.Value)
                     {
                         entityManager.SetComponentData(boss, Database.TeamDefault.Value);
                         Plugin.BLogger.Info(LogCategory.Boss, $"Boss team changed from {currentTeam.Value} to {Database.TeamDefault.Value.Value}");
-                        
+
                         // TeamReference will be synced by BossTrackingSystem after the game creates it
                     }
                 }
             }
-        } 
+        }
 
 
         internal static void GenerateStats()
         {
-            var bossNeedStats = Database.BOSSES.Where(x=> x.unitStats == null).ToList();
+            var bossNeedStats = Database.BOSSES.Where(x => x.unitStats == null).ToList();
 
             foreach (var bossModel in bossNeedStats)
             {

@@ -47,7 +47,9 @@ namespace BloodyBoss.DB.Models
         public UnitStatsModel unitStats { get; set; } = null;
 
         private const double SendMessageDelay = 2;
-        public static List<string> vbloodKills = new();
+        // BUG FIX #2: Was 'static' — caused all boss instances to share one killer list.
+        // Making it an instance field gives each boss its own independent list.
+        public List<string> vbloodKills = new();
 
         public bool vbloodFirstKill = false;
 
@@ -130,6 +132,16 @@ namespace BloodyBoss.DB.Models
 
         public bool Spawn(Entity sender)
         {
+            // BUG FIX #5: Guard against zero/negative Lifetime which causes instant despawn.
+            // SpawnUnitWithCallback with Lifetime=0 destroys the entity the same frame it is created.
+            if (Lifetime <= 0)
+            {
+                Plugin.BLogger.Error(LogCategory.Boss,
+                    $"Boss {name} has an invalid Lifetime of {Lifetime}s. " +
+                    $"Spawn aborted. Set a positive value in seconds (e.g. 7200 = 2 hours).");
+                return false;
+            }
+
             // Verificar y obtener posición válida para spawn
             var (validX, validZ, usedOriginal) = GetValidSpawnPosition(x, z);
             
@@ -178,9 +190,12 @@ namespace BloodyBoss.DB.Models
             
 
             var _message = PluginConfig.SpawnMessageBossTemplate.Value;
-            _message = _message.Replace("#time#", FontColorChatSystem.Yellow($"{Lifetime / 60}"));
+            // BUG FIX #5: Show both minutes and seconds so admins can't confuse the unit.
+            _message = _message.Replace("#time#", FontColorChatSystem.Yellow($"{Lifetime / 60:F0} minutes ({Lifetime}s)"));
             _message = _message.Replace("#worldbossname#", FontColorChatSystem.Yellow($"{name}"));
-            HourDespawn = DateTime.Parse(Hour).AddSeconds(Lifetime).ToString("HH:mm:ss");
+            // Guard: Hour may be empty if boss was started manually without a schedule set
+            if (!string.IsNullOrEmpty(Hour) && DateTime.TryParse(Hour, out var parsedHour))
+                HourDespawn = parsedHour.AddSeconds(Lifetime).ToString("HH:mm:ss");
             var _ref_message = (FixedString512Bytes) FontColorChatSystem.Green($"{_message}");
             ServerChatUtils.SendSystemMessageToAllClients(Plugin.SystemsCore.EntityManager,ref _ref_message);
 
@@ -194,6 +209,15 @@ namespace BloodyBoss.DB.Models
         
         public bool Spawn(Entity sender, float locationX, float locationY, float locationZ)
         {
+            // BUG FIX #5: Guard against zero/negative Lifetime which causes instant despawn.
+            if (Lifetime <= 0)
+            {
+                Plugin.BLogger.Error(LogCategory.Boss,
+                    $"Boss {name} has an invalid Lifetime of {Lifetime}s. " +
+                    $"Spawn aborted. Set a positive value in seconds (e.g. 7200 = 2 hours).");
+                return false;
+            }
+
             // Verificar y obtener posición válida para spawn
             var (validX, validZ, usedOriginal) = GetValidSpawnPosition(locationX, locationZ);
             
@@ -250,10 +274,13 @@ namespace BloodyBoss.DB.Models
 
 
             var _message = PluginConfig.SpawnMessageBossTemplate.Value;
-            _message = _message.Replace("#time#", FontColorChatSystem.Yellow($"{Lifetime / 60}"));
+            // BUG FIX #5: Show both minutes and seconds so admins can't confuse the unit.
+            _message = _message.Replace("#time#", FontColorChatSystem.Yellow($"{Lifetime / 60:F0} minutes ({Lifetime}s)"));
             _message = _message.Replace("#worldbossname#", FontColorChatSystem.Yellow($"{name}"));
             var _ref_message = (FixedString512Bytes)FontColorChatSystem.Green($"{_message}");
-            HourDespawn = DateTime.Parse(Hour).AddSeconds(Lifetime).ToString("HH:mm:ss");
+            // Guard: Hour may be empty if boss was started manually without a schedule set
+            if (!string.IsNullOrEmpty(Hour) && DateTime.TryParse(Hour, out var parsedHour))
+                HourDespawn = parsedHour.AddSeconds(Lifetime).ToString("HH:mm:ss");
             ServerChatUtils.SendSystemMessageToAllClients(Plugin.SystemsCore.EntityManager, ref _ref_message);
 
             return true;
@@ -332,9 +359,10 @@ namespace BloodyBoss.DB.Models
                 }
             }
 
-            if(string.Empty != Hour)
+            // Guard: use TryParse so an invalid or empty Hour string doesn't throw
+            if (!string.IsNullOrEmpty(Hour) && DateTime.TryParse(Hour, out var parsedHour))
             {
-                HourDespawn = DateTime.Parse(Hour).AddSeconds(Lifetime - 2).ToString("HH:mm:ss");
+                HourDespawn = parsedHour.AddSeconds(Lifetime - 2).ToString("HH:mm:ss");
             }
             
             return true;
@@ -584,17 +612,22 @@ namespace BloodyBoss.DB.Models
         internal void SetHour(string hour)
         {
             Hour = hour;
-            HourDespawn = DateTime.Parse(hour).AddSeconds(Lifetime - 5).ToString("HH:mm:ss");
+            // Guard: validate the hour string before parsing — bad input from commands shouldn't crash
+            if (!string.IsNullOrEmpty(hour) && DateTime.TryParse(hour, out var parsedHour))
+                HourDespawn = parsedHour.AddSeconds(Lifetime - 5).ToString("HH:mm:ss");
             Database.saveDatabase();
         }
 
 
         internal void KillBoss(Entity user)
         {
+            // BUG FIX #1: The original code destroyed bossEntity in the first block instead of iconEntity.
+            // The first block is for the MAP ICON — it must use iconEntity.
+            // The second block is for the BOSS ENTITY — it uses bossEntity.
 
             if (GetIcon())
             {
-                StatChangeUtility.KillOrDestroyEntity(Plugin.SystemsCore.EntityManager, bossEntity, user, user, 0, StatChangeReason.Any, true);
+                StatChangeUtility.KillOrDestroyEntity(Plugin.SystemsCore.EntityManager, iconEntity, user, user, 0, StatChangeReason.Any, true);
             }
 
             if (GetBossEntity())
@@ -605,6 +638,12 @@ namespace BloodyBoss.DB.Models
 
         internal void DespawnBoss(Entity user)
         {
+            // BUG FIX #3: Capture the entity reference BEFORE destroying it.
+            // After KillBoss() the entity no longer exists, so GetBossEntity() returns false
+            // and the unregister calls were never reached.
+            var entityToUnregister = bossEntity;
+            bool hadValidEntity = (entityToUnregister != Entity.Null);
+
             try
             {
                 ClearDropTable(bossEntity);
@@ -636,13 +675,17 @@ namespace BloodyBoss.DB.Models
 
             }
 
-            // Unregister boss from damage tracking
-            if (GetBossEntity())
+            // BUG FIX #3: Use the captured reference to unregister from BOTH tracking systems.
+            // Previously only BossGameplayEventSystem was called and only if GetBossEntity() succeeded
+            // after the entity was already destroyed — which it never could.
+            if (hadValidEntity)
             {
-                BossGameplayEventSystem.UnregisterBoss(bossEntity);
+                BossGameplayEventSystem.UnregisterBoss(entityToUnregister);
+                BossTrackingSystem.UnregisterBoss(entityToUnregister);
             }
             
             bossSpawn = false;
+            bossEntity = Entity.Null;
             Database.saveDatabase();
         }
 
@@ -667,16 +710,18 @@ namespace BloodyBoss.DB.Models
                     {
                         Plugin.BLogger.Info(LogCategory.Boss, "Spawn Random Boss");
                         bossRandom = Database.BOSSES[Random.Next(Database.BOSSES.Count)];
-                        // Use the random boss position with its own Y coordinate
+                        // BUG FIX #4: Do NOT set bossRandom.bossSpawn = true here.
+                        // SpawnUnitWithCallback is async — the entity doesn't exist yet.
+                        // ModifyBoss() inside the callback is the single source of truth for bossSpawn.
                         bossRandom.Spawn(user, bossRandom.x, bossRandom.y, bossRandom.z);
-                        bossRandom.bossSpawn = true;
-                        Database.saveDatabase();
                     } else
                     {
                         Plugin.BLogger.Info(LogCategory.Boss, "Spawn Boss");
+                        // BUG FIX #4: Do NOT set bossSpawn = true here and do NOT saveDatabase here.
+                        // SpawnUnitWithCallback is async — if the callback throws, bossSpawn gets
+                        // permanently stuck at true with no entity in the world, blocking all future spawns.
+                        // ModifyBoss() inside the callback sets bossSpawn = true and saves only on success.
                         Spawn(user);
-                        bossSpawn = true;
-                        Database.saveDatabase();
                     }
                     
                 } else
@@ -807,9 +852,13 @@ namespace BloodyBoss.DB.Models
                 }
             }
             
+            // BUG FIX #6: Capture the original count BEFORE replacing the list.
+            // Previously both sides of the log called GetKillers() which returned the
+            // already-replaced list, making both numbers always identical.
+            int originalCount = vbloodKills.Count;
             // Replace the killers list with only valid killers
             vbloodKills = validKillers;
-            Plugin.BLogger.Info(LogCategory.Reward, $"Filtered killers list: {vbloodKills.Count} valid players out of {GetKillers().Count} total");
+            Plugin.BLogger.Info(LogCategory.Reward, $"Filtered killers list: {vbloodKills.Count} valid players out of {originalCount} total");
         }
 
         public string GetAnnouncementMessage()

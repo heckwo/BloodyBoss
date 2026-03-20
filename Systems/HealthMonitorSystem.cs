@@ -1,4 +1,4 @@
-using Bloody.Core;
+﻿using Bloody.Core;
 using BloodyBoss.DB;
 using ProjectM;
 using System;
@@ -12,7 +12,7 @@ namespace BloodyBoss.Systems
         private static Dictionary<string, float> _lastHealthCheck = new Dictionary<string, float>();
         private static float _lastCheckTime = 0;
         private const float CHECK_INTERVAL = 0.5f; // Check every 0.5 seconds
-        
+
         public static void Update()
         {
             try
@@ -20,22 +20,22 @@ namespace BloodyBoss.Systems
                 var currentTime = UnityEngine.Time.time;
                 if (currentTime - _lastCheckTime < CHECK_INTERVAL)
                     return;
-                    
+
                 _lastCheckTime = currentTime;
-                
+
                 // Check all spawned bosses
                 foreach (var boss in Database.BOSSES)
                 {
                     if (!boss.bossSpawn || !boss.GetBossEntity())
                         continue;
-                        
+
                     if (boss.bossEntity.Has<Health>())
                     {
                         var health = boss.bossEntity.Read<Health>();
                         float currentHpPercent = (health.Value / health.MaxHealth._Value) * 100f;
-                        
+
                         var healthKey = $"{boss.nameHash}_health";
-                        
+
                         // First time check or health changed
                         if (!_lastHealthCheck.ContainsKey(healthKey))
                         {
@@ -44,13 +44,17 @@ namespace BloodyBoss.Systems
                         }
                         else if (Math.Abs(_lastHealthCheck[healthKey] - currentHpPercent) > 0.1f)
                         {
-                            // Health changed
                             float previousHpPercent = _lastHealthCheck[healthKey];
-                            Plugin.BLogger.Warning(LogCategory.System, $"[HEALTH-MONITOR] Boss {boss.name} HP changed: {previousHpPercent:F1}% -> {currentHpPercent:F1}%");
-                            
-                            // Check mechanics - pass both previous and current HP
-                            BossMechanicSystem.CheckHpThresholdMechanics(boss.bossEntity, boss, currentHpPercent, previousHpPercent);
-                            
+
+                            // Only process as a real combat event if HP went DOWN.
+                            // A 0→100 jump (or any increase) is a spawn/heal event — never a damage threshold crossing.
+                            // Without this guard, any boss spawning would immediately trigger all sub-100% mechanics.
+                            if (currentHpPercent < previousHpPercent)
+                            {
+                                Plugin.BLogger.Warning(LogCategory.System, $"[HEALTH-MONITOR] Boss {boss.name} HP changed: {previousHpPercent:F1}% -> {currentHpPercent:F1}%");
+                                BossMechanicSystem.CheckHpThresholdMechanics(boss.bossEntity, boss, currentHpPercent, previousHpPercent);
+                            }
+
                             _lastHealthCheck[healthKey] = currentHpPercent;
                         }
                     }
@@ -61,7 +65,7 @@ namespace BloodyBoss.Systems
                 Plugin.BLogger.Error(LogCategory.System, $"[HEALTH-MONITOR] Error: {ex.Message}");
             }
         }
-        
+
         public static void RemoveBoss(string bossNameHash)
         {
             var healthKey = $"{bossNameHash}_health";
