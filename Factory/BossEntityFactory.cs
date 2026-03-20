@@ -52,7 +52,10 @@ namespace BloodyBoss.Factory
                 Model = model,
                 Position = finalPosition,
                 Sender = sender,
-                LifetimeDuration = model.Lifetime + 30
+                // BUG FIX #8: Was 'model.Lifetime + 30' with no justification.
+                // This made the boss entity live 30s longer than the configured value,
+                // and mismatched the icon lifetime (Lifetime + 5) creating orphaned icons.
+                LifetimeDuration = model.Lifetime
             };
             
             // Spawn the boss entity
@@ -109,10 +112,11 @@ namespace BloodyBoss.Factory
             // Initialize boss mechanics
             BossMechanicSystem.InitializeBossMechanics(bossEntity, model);
             
-            // Boss will be registered for damage tracking when first damage event occurs
-            // This ensures proper entity reference stability
-            
-            // Set boss spawn state
+            // BUG FIX #9: This factory is currently only called from the developer test command.
+            // The canonical production spawn path is BossEncounterModel.Spawn() → ModifyBoss().
+            // If this factory is ever promoted to production use, the bossSpawn/saveDatabase calls
+            // below should be removed and deferred to ModifyBoss() to keep a single authority.
+            // For now, this is acceptable since it runs inside the confirmed spawn callback.
             model.bossSpawn = true;
             model.LastSpawn = DateTime.Now;
             

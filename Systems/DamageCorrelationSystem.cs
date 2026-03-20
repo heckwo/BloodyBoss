@@ -95,17 +95,28 @@ namespace BloodyBoss.Systems
         }
         
         /// <summary>
-        /// Process correlated damage event
+        /// Process correlated damage event.
+        /// BUG FIX #12: This method was previously a stub that logged a message and did nothing else.
+        /// The log implied actual processing was happening, which it was not.
+        /// DamageCorrelationSystem was intended to unify the two damage streams (StatChangeEvent from
+        /// DamageDetectionHook and DamageTakenEvent from AttackerTrackingHook) into one authoritative
+        /// call, but the final dispatch was never implemented — both hooks call BossGameplayEventSystem
+        /// independently anyway.
+        /// 
+        /// This method is left as a clean extension point. To complete the implementation:
+        ///   1. Replace the two separate BossGameplayEventSystem calls in the hooks with a single
+        ///      DamageCorrelationSystem.RecordDamage / RecordAttacker pair.
+        ///   2. Implement the unified dispatch here, calling AddKiller and CheckHpThresholdMechanics.
+        ///   3. Remove ProcessStatChangeEvent and ProcessDamageTakenEvent from BossGameplayEventSystem.
         /// </summary>
         private static void ProcessCorrelatedDamage(Entity target, DamageRecord record)
         {
-            Plugin.BLogger.Info(LogCategory.Damage, $"[DamageCorrelation] Correlated damage - Target: {target.Index}, Damage: {record.Damage:F1}, Attacker: {record.Attacker.Index}");
-            
-            // Remove from cache after processing
+            // Remove from cache after correlation window expires
             _damageCache.Remove(target);
             
-            // Note: Here we would call the unified damage processing
-            // For now, the existing separate processing in BossGameplayEventSystem continues
+            // TODO: Implement unified damage dispatch here (see summary above).
+            // For now both hooks process independently — this is effectively dead code.
+            Plugin.BLogger.Trace(LogCategory.Damage, $"[DamageCorrelation] Correlated record for Target: {target.Index} — dispatch not yet implemented.");
         }
         
         /// <summary>

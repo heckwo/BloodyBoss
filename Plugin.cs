@@ -247,8 +247,11 @@ public class Plugin : BasePlugin
                             // IMPORTANT: Reapply boss configuration after server restart
                             BLogger.Info(LogCategory.Boss, $"[STARTUP] Reapplying configuration to boss '{boss.name}'");
                             
-                            // Get first online user for ModifyBoss
-                            var userModel = Bloody.Core.GameData.v1.GameData.Users.Online.FirstOrDefault();
+                            // BUG FIX #7: Use Users.All instead of Users.Online.
+                            // On auto-restart servers no player is online yet, so Users.Online.FirstOrDefault()
+                            // returns null and ModifyBoss is skipped — boss survives with vanilla stats.
+                            // Users.All always has valid user entities for passing to game systems.
+                            var userModel = Bloody.Core.GameData.v1.GameData.Users.All.FirstOrDefault();
                             if (userModel != null)
                             {
                                 // Reapply all boss modifications
@@ -276,7 +279,7 @@ public class Plugin : BasePlugin
                             }
                             else
                             {
-                                BLogger.Warning(LogCategory.Boss, $"[STARTUP] No online users found to reapply boss '{boss.name}' configuration");
+                                BLogger.Warning(LogCategory.Boss, $"[STARTUP] No user entities found to reapply boss '{boss.name}' configuration");
                                 _needsBossReconfiguration = true;
                             }
                             
@@ -361,8 +364,8 @@ public class Plugin : BasePlugin
                             // IMPORTANT: Reapply boss configuration after entity re-link
                             BLogger.Info(LogCategory.Boss, $"[STARTUP] Reapplying configuration to re-linked boss '{boss.name}'");
                             
-                            // Get first online user for ModifyBoss
-                            var userModel = Bloody.Core.GameData.v1.GameData.Users.Online.FirstOrDefault();
+                            // BUG FIX #7: Use Users.All instead of Users.Online (same fix as above).
+                            var userModel = Bloody.Core.GameData.v1.GameData.Users.All.FirstOrDefault();
                             if (userModel != null)
                             {
                                 // Reapply all boss modifications
@@ -390,7 +393,7 @@ public class Plugin : BasePlugin
                             }
                             else
                             {
-                                BLogger.Warning(LogCategory.Boss, $"[STARTUP] No online users found to reapply re-linked boss '{boss.name}' configuration");
+                                BLogger.Warning(LogCategory.Boss, $"[STARTUP] No user entities found to reapply re-linked boss '{boss.name}' configuration");
                                 _needsBossReconfiguration = true;
                             }
                             

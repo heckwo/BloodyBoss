@@ -27,7 +27,10 @@ namespace BloodyBoss.Utils
                 return false;
                 
             var nameable = entity.Read<NameableInteractable>();
-            return nameable.Name.Value.Contains("bb");
+            // BUG FIX #10: Was Contains("bb") which false-positives on any entity whose vanilla
+            // name contains the substring "bb" (e.g. "Goblin", "Abbot"). Must use EndsWith
+            // to match only the intentional "nameHash + bb" suffix we apply in RenameBoss().
+            return nameable.Name.Value.EndsWith("bb");
         }
         
         /// <summary>

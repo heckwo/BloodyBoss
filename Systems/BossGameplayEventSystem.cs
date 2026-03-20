@@ -361,7 +361,19 @@ namespace BloodyBoss.Systems
                                 }
                                 
                                 // Check mechanics based on HP threshold
-                                BossMechanicSystem.CheckHpThresholdMechanics(modelBoss.bossEntity, modelBoss, currentHpPercent);
+                                // BUG FIX #11: Previously always passed 100f as previousHpPercent.
+                                // This meant ShouldTriggerHpMechanic's threshold-crossing check
+                                // (previousHp >= threshold && currentHp < threshold) would evaluate
+                                // true on the very first damage event and could retrigger incorrectly.
+                                // Now we pull the tracked previous value from BossTrackingSystem.
+                                float previousHpPercent = 100f;
+                                Entity trackedEntity;
+                                if (BossTrackingSystem.TryGetBossByName(modelBoss.name, out trackedEntity))
+                                {
+                                    // BossTrackingSystem.LastHealthPercent is updated each tick — use it
+                                    previousHpPercent = BossTrackingSystem.GetLastHealthPercent(trackedEntity);
+                                }
+                                BossMechanicSystem.CheckHpThresholdMechanics(modelBoss.bossEntity, modelBoss, currentHpPercent, previousHpPercent);
                             }
                         }
                     }

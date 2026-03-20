@@ -1,3 +1,5 @@
+using Bloody.Core.API.v1;
+using Bloody.Core.Helper.v1;
 using BloodyBoss.DB;
 using BloodyBoss.DB.Models;
 using BloodyBoss.Exceptions;
@@ -10,6 +12,13 @@ namespace BloodyBoss.Command
     [CommandGroup("bb schedule", "Boss scheduling and timer commands")]
     public static class BossScheduleCommand
     {
+        [Command("time", usage: "", description: "Show current server time (use this format when setting boss schedule)", adminOnly: true)]
+        public static void ShowServerTime(ChatCommandContext ctx)
+        {
+            var now = DateTime.Now;
+            ctx.Reply($"Server time: {now.ToString("HH:mm:ss")} — use {FontColorChatSystem.Yellow(now.ToString("HH:mm"))} format for .bb schedule set");
+        }
+
         [Command("set", usage: "<BossName> <HH:mm>", description: "Set spawn time for a boss", adminOnly: true)]
         public static void SetSchedule(ChatCommandContext ctx, string bossName, string time)
         {
@@ -18,7 +27,7 @@ namespace BloodyBoss.Command
                 if (Database.GetBoss(bossName, out BossEncounterModel boss))
                 {
                     boss.SetHour(time);
-                    ctx.Reply($"⏰ Spawn time '{time}' set for boss '{bossName}'");
+                    ctx.Reply($"Spawn time '{time}' set for boss '{bossName}'");
                 }
                 else
                 {
@@ -46,12 +55,12 @@ namespace BloodyBoss.Command
                     {
                         throw ctx.Error($"Boss '{bossName}' is already paused");
                     }
-                    
+
                     boss.IsPaused = true;
                     boss.PausedAt = DateTime.Now;
                     Database.saveDatabase();
-                    
-                    ctx.Reply($"⏸️ Boss '{bossName}' timer paused at {DateTime.Now:HH:mm:ss}");
+
+                    ctx.Reply($"Boss '{bossName}' timer paused at {DateTime.Now:HH:mm:ss}");
                 }
                 else
                 {
@@ -75,14 +84,14 @@ namespace BloodyBoss.Command
                     {
                         throw ctx.Error($"Boss '{bossName}' is not paused");
                     }
-                    
+
                     // Calculate pause duration
                     var pauseDuration = DateTime.Now - boss.PausedAt.Value;
-                    
+
                     boss.IsPaused = false;
                     boss.PausedAt = null;
                     Database.saveDatabase();
-                    
+
                     ctx.Reply($"▶️ Boss '{bossName}' timer resumed (was paused for {pauseDuration.TotalMinutes:F1} minutes)");
                 }
                 else
@@ -102,22 +111,22 @@ namespace BloodyBoss.Command
             try
             {
                 var bosses = Database.BOSSES.Where(b => !string.IsNullOrEmpty(b.Hour)).OrderBy(b => b.Hour).ToList();
-                
+
                 if (bosses.Count == 0)
                 {
                     ctx.Reply("No bosses have scheduled spawn times");
                     return;
                 }
-                
+
                 ctx.Reply($"📅 Scheduled Bosses ({bosses.Count}):");
                 ctx.Reply("----------------------------");
-                
+
                 foreach (var boss in bosses)
                 {
                     var status = boss.IsPaused ? "⏸️ PAUSED" : (boss.bossSpawn ? "🟢 ACTIVE" : "⭕ SCHEDULED");
                     ctx.Reply($"{boss.Hour} - {boss.name} {status}");
                 }
-                
+
                 ctx.Reply("----------------------------");
             }
             catch (Exception e)
@@ -137,7 +146,7 @@ namespace BloodyBoss.Command
                     boss.IsPaused = false;
                     boss.PausedAt = null;
                     Database.saveDatabase();
-                    
+
                     ctx.Reply($"🗓️ Schedule cleared for boss '{bossName}'");
                 }
                 else
